@@ -31,6 +31,7 @@ import com.zavakid.paxos.Accepted;
 import com.zavakid.paxos.Acceptor;
 import com.zavakid.paxos.Promise;
 import com.zavakid.paxos.Proposer;
+import com.zavakid.paxos.util.Asserts;
 import com.zavakid.paxos.util.Counter;
 
 /**
@@ -95,7 +96,7 @@ public class DefaultProposer implements Proposer {
                 continue;
             }
 
-            throw new IllegalStateException("unreachable code");
+            Asserts.unreachable();
         }
 
         if (nakPromisesNum >= this.majorityAcceptorNum) {
@@ -117,7 +118,7 @@ public class DefaultProposer implements Proposer {
             return tryAccept(newEpoch, var, newValue);
         }
 
-        throw new IllegalStateException("unreachable code");
+        return Asserts.unreachable();
 
     }
 
@@ -147,7 +148,7 @@ public class DefaultProposer implements Proposer {
                 oldAcceptedValues.add(accepted.getValue());
                 continue;
             }
-            throw new IllegalStateException("unreachable code");
+            Asserts.unreachable();
         }
 
         if (nakAcceptedNum >= this.majorityAcceptorNum) {
@@ -158,7 +159,7 @@ public class DefaultProposer implements Proposer {
             return oldAcceptedValues.getMostItem();
         }
 
-        throw new IllegalStateException("unreachable code");
+        return Asserts.unreachable();
     }
 
     protected List<Promise> concurrentPrepare(final Object var, final Long epoch) {
