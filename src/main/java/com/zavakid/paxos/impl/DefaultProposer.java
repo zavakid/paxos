@@ -27,6 +27,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,13 +47,14 @@ import com.zavakid.paxos.util.MDCs;
  */
 public class DefaultProposer implements Proposer {
 
-    private static final Logger LOG         = LoggerFactory.getLogger(DefaultProposer.class);
-    private static final String NAME_PREFIX = "proposer_";
-    private AtomicLong          EPOCH_SEQ   = new AtomicLong();
-    private AtomicLong          LAST_EPOCH  = new AtomicLong(-1L);
+    private static final Logger LOG                        = LoggerFactory.getLogger(DefaultProposer.class);
+    private static final String NAME_PREFIX                = "proposer_";
 
+    // 当发生冲突时，沉睡后再发起下一次请求
+    private long                sleepTimeWhenNeedNextRound = TimeUnit.NANOSECONDS.convert(10, TimeUnit.MILLISECONDS);
+    private AtomicLong          lastEpoch                  = new AtomicLong(-1L);
     private String              name;
-    private Set<Acceptor>       acceptors   = new HashSet<Acceptor>();
+    private Set<Acceptor>       acceptors                  = new HashSet<Acceptor>();
     private int                 majorityAcceptorNum;
     private Long                proposerId;
     private Integer             proposerNum;
@@ -278,6 +280,7 @@ public class DefaultProposer implements Proposer {
     }
 
     protected Object nextRound(Long maxEpoch, Object var, Object value) {
+        LockSupport.parkNanos(this.sleepTimeWhenNeedNextRound);
         Long newEpoch = generateEpoch(maxEpoch, var);
         return proposeWithEpoch(newEpoch, var, value);
     }
@@ -292,14 +295,14 @@ public class DefaultProposer implements Proposer {
      * 也可能是从上次 prepare/acceptor 中获得的最大 epoch <br/>
      */
     synchronized protected Long generateEpoch(Long preEpoch, Object var) {
-        long lastEpoch = this.EPOCH_SEQ.get();
+        long lastEpoch = this.lastEpoch.get();
         if (preEpoch > lastEpoch) {
             long epoch = (preEpoch / this.proposerNum + 1) * this.proposerNum + this.proposerId;
-            this.EPOCH_SEQ.set(epoch);
+            this.lastEpoch.set(epoch);
             return epoch;
         } else {
             long epoch = ((lastEpoch / this.proposerNum + 1) * this.proposerNum) + this.proposerId;
-            this.EPOCH_SEQ.set(epoch);
+            this.lastEpoch.set(epoch);
             return epoch;
         }
     }
