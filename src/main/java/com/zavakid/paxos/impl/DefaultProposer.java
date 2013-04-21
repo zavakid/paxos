@@ -17,13 +17,15 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
+import java.util.concurrent.TimeUnit;
 
 import com.zavakid.paxos.Accepted;
 import com.zavakid.paxos.Acceptor;
@@ -37,18 +39,23 @@ import com.zavakid.paxos.util.Counter;
  */
 public class DefaultProposer implements Proposer {
 
-    private Set<Acceptor> acceptors = new HashSet<Acceptor>();
-    private int           majorityAcceptorNum;
-    private Long          proposerId;
-    private Integer       proposerNum;
-    private Executor      executor;
+    private Set<Acceptor>      acceptors = new HashSet<Acceptor>();
+    private int                majorityAcceptorNum;
+    private Long               proposerId;
+    private Integer            proposerNum;
+    private ThreadPoolExecutor executor;
 
-    public DefaultProposer(Set<Acceptor> acceptors, Long proposerId, Integer proposerNum, int threads){
+    public DefaultProposer(Set<Acceptor> acceptors, long proposerId, int proposerNum, int threads){
         this.acceptors = acceptors;
         this.majorityAcceptorNum = acceptors.size() / 2 + 1;
         this.proposerId = proposerId;
         this.proposerNum = proposerNum;
-        this.executor = Executors.newFixedThreadPool(threads);
+        this.executor = new ThreadPoolExecutor(threads,
+            threads,
+            0L,
+            TimeUnit.SECONDS,
+            new ArrayBlockingQueue<Runnable>(threads),
+            new CallerRunsPolicy());
     }
 
     public Object propose(final Object var, final Object value) {
@@ -59,7 +66,10 @@ public class DefaultProposer implements Proposer {
     public Object propose(final Long epoch, final Object var, final Object value) {
 
         List<Promise> promises = concurrentPrepare(var, epoch);
-        // TODO 如果得到的 promises 数量不够一半，则需要进行下一轮 prepare
+        // 有可能是网络出现中断引起的
+        if (promises.size() < this.majorityAcceptorNum) {
+            propose(epoch, var, value);
+        }
 
         int nakPromisesNum = 0;
         Long maxEpoch = epoch;
@@ -94,8 +104,7 @@ public class DefaultProposer implements Proposer {
 
         // prepare success, and we can continue phase 2
         if (firstPromises >= this.majorityAcceptorNum) {
-            List<Accepted> accepteds = concurrentCommit(epoch, var, value);
-            // TODO analytic the accepted
+            return tryAccept(epoch, var, value);
         }
 
         if (maybeHasValuePromises >= this.majorityAcceptorNum
@@ -105,12 +114,51 @@ public class DefaultProposer implements Proposer {
             if (newValue == null) {
                 newValue = value;
             }
-            List<Accepted> accepteds = concurrentCommit(newEpoch, var, newValue);
-            // TODO analytic the accepted
+            return tryAccept(newEpoch, var, newValue);
         }
 
         throw new IllegalStateException("unreachable code");
 
+    }
+
+    public Object tryAccept(final Long epoch, final Object var, final Object value) {
+        List<Accepted> accepteds = concurrentCommit(epoch, var, value);
+        // 网络中断，重新发起一次
+        if (accepteds.size() < this.majorityAcceptorNum) {
+            return propose(epoch, var, value);
+        }
+
+        int nakAcceptedNum = 0;
+        int successAcceptedNum = 0;
+        Long maxEpochWhenAccepted = epoch;
+        Counter<Object> oldAcceptedValues = new Counter<Object>();
+        for (Accepted accepted : accepteds) {
+            // 说明别的 Proposer 预约了更新的 epoch
+            if (accepted.isNAK()) {
+                nakAcceptedNum++;
+                maxEpochWhenAccepted = maxEpochWhenAccepted > accepted.getEpoch() ? maxEpochWhenAccepted : accepted.getEpoch();
+                oldAcceptedValues.add(accepted.getValue());
+                continue;
+            }
+
+            // 成功占领
+            if (!accepted.isNAK()) {
+                successAcceptedNum++;
+                oldAcceptedValues.add(accepted.getValue());
+                continue;
+            }
+            throw new IllegalStateException("unreachable code");
+        }
+
+        if (nakAcceptedNum >= this.majorityAcceptorNum) {
+            return nextRound(maxEpochWhenAccepted, var, value);
+        }
+
+        if (successAcceptedNum >= this.majorityAcceptorNum) {
+            return oldAcceptedValues.getMostItem();
+        }
+
+        throw new IllegalStateException("unreachable code");
     }
 
     protected List<Promise> concurrentPrepare(final Object var, final Long epoch) {
@@ -175,11 +223,22 @@ public class DefaultProposer implements Proposer {
     }
 
     protected void processExecutionExeception(ExecutionException e) {
-        // no op
+        // TODO
+        e.printStackTrace();
     }
 
     private Long generateEpoch(Long preEpoch, Object var) {
         return (preEpoch / this.proposerNum) * proposerNum + this.proposerId;
     }
 
+    @Override
+    public void stop() {
+        this.executor.shutdown();
+        try {
+            this.executor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            // TODO
+            e.printStackTrace();
+        }
+    }
 }
