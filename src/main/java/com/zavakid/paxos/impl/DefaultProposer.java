@@ -26,6 +26,11 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import com.zavakid.paxos.Accepted;
 import com.zavakid.paxos.Acceptor;
@@ -33,6 +38,7 @@ import com.zavakid.paxos.Promise;
 import com.zavakid.paxos.Proposer;
 import com.zavakid.paxos.util.Asserts;
 import com.zavakid.paxos.util.Counter;
+import com.zavakid.paxos.util.MDCs;
 
 /**
  * @author zavakid 2013-4-20 下午9:18:11
@@ -40,13 +46,19 @@ import com.zavakid.paxos.util.Counter;
  */
 public class DefaultProposer implements Proposer {
 
-    private Set<Acceptor>      acceptors = new HashSet<Acceptor>();
-    private int                majorityAcceptorNum;
-    private Long               proposerId;
-    private Integer            proposerNum;
-    private ThreadPoolExecutor executor;
+    private static final Logger LOG         = LoggerFactory.getLogger(DefaultProposer.class);
+    private static final String NAME_PREFIX = "proposer_";
+    private AtomicLong          EPOCH_SEQ   = new AtomicLong();
+
+    private String              name;
+    private Set<Acceptor>       acceptors   = new HashSet<Acceptor>();
+    private int                 majorityAcceptorNum;
+    private Long                proposerId;
+    private Integer             proposerNum;
+    private ThreadPoolExecutor  executor;
 
     public DefaultProposer(Set<Acceptor> acceptors, long proposerId, int proposerNum, int threads){
+        this.name = NAME_PREFIX + proposerId;
         this.acceptors = acceptors;
         this.majorityAcceptorNum = acceptors.size() / 2 + 1;
         this.proposerId = proposerId;
@@ -60,16 +72,20 @@ public class DefaultProposer implements Proposer {
     }
 
     public Object propose(final Object var, final Object value) {
-        final Long epoch = generateEpoch(0L, var);
-        return propose(epoch, var, value);
+        final Long epoch = generateEpoch(EPOCH_SEQ.getAndIncrement(), var);
+        return proposeWithEpoch(epoch, var, value);
     }
 
-    public Object propose(final Long epoch, final Object var, final Object value) {
-
+    public Object proposeWithEpoch(final Long epoch, final Object var, final Object value) {
+        MDC.put(MDCs.MDC_NAME, this.name);
+        LOG.info("start to prepare epoch[{}] for var [{}], value [{}]", epoch, var, value);
         List<Promise> promises = concurrentPrepare(var, epoch);
         // 有可能是网络出现中断引起的
         if (promises.size() < this.majorityAcceptorNum) {
-            propose(epoch, var, value);
+            LOG.info("receive promises num [{}] , less then majorityAcceptorNum [{}], try to propose again",
+                promises.size(),
+                this.majorityAcceptorNum);
+            proposeWithEpoch(epoch, var, value);
         }
 
         int nakPromisesNum = 0;
@@ -100,22 +116,38 @@ public class DefaultProposer implements Proposer {
         }
 
         if (nakPromisesNum >= this.majorityAcceptorNum) {
+            LOG.info("prepare fail for var [{}], value [{}], nakPromisesNum [{}] is greater then majorityAcceptorNum [{}], the max preEpoch is [{}]",
+                var,
+                value,
+                nakPromisesNum,
+                majorityAcceptorNum,
+                maxEpoch);
             return nextRound(maxEpoch, var, value);
         }
 
         // prepare success, and we can continue phase 2
         if (firstPromises >= this.majorityAcceptorNum) {
+            LOG.info("prepare success for var [{}], value [{}], firstPromises [{}] is greater then majorityAcceptorNum [{}], try accept with epoch [{}]",
+                var,
+                value,
+                firstPromises,
+                this.majorityAcceptorNum,
+                epoch);
             return tryAccept(epoch, var, value);
         }
 
         if (maybeHasValuePromises >= this.majorityAcceptorNum
             || (firstPromises + maybeHasValuePromises) >= this.majorityAcceptorNum) {
-            Long newEpoch = generateEpoch(maxEpoch, var);
             Object newValue = values.getMostItem();
             if (newValue == null) {
                 newValue = value;
             }
-            return tryAccept(newEpoch, var, newValue);
+
+            LOG.info("prepare success for var [{}], epoch [{}], we can try accept with new value [{}]",
+                var,
+                epoch,
+                newValue);
+            return tryAccept(epoch, var, newValue);
         }
 
         return Asserts.unreachable();
@@ -126,7 +158,7 @@ public class DefaultProposer implements Proposer {
         List<Accepted> accepteds = concurrentCommit(epoch, var, value);
         // 网络中断，重新发起一次
         if (accepteds.size() < this.majorityAcceptorNum) {
-            return propose(epoch, var, value);
+            return proposeWithEpoch(epoch, var, value);
         }
 
         int nakAcceptedNum = 0;
@@ -220,7 +252,7 @@ public class DefaultProposer implements Proposer {
 
     protected Object nextRound(Long maxEpoch, Object var, Object value) {
         Long newEpoch = generateEpoch(maxEpoch, var);
-        return propose(newEpoch, var, value);
+        return proposeWithEpoch(newEpoch, var, value);
     }
 
     protected void processExecutionExeception(ExecutionException e) {
@@ -229,7 +261,9 @@ public class DefaultProposer implements Proposer {
     }
 
     private Long generateEpoch(Long preEpoch, Object var) {
-        return (preEpoch / this.proposerNum) * proposerNum + this.proposerId;
+        long factor = this.EPOCH_SEQ.getAndIncrement();
+        preEpoch = preEpoch > factor ? preEpoch : factor;
+        return ((preEpoch) / this.proposerNum) * proposerNum + this.proposerId;
     }
 
     @Override

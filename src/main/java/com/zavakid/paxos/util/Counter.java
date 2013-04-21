@@ -51,12 +51,17 @@ public class Counter<T> {
 
     public T getMostItem() {
         Collection<Long> values = values();
-        Long max = Collections.max(values);
+        Long maxKey = -1L;
+        T mostItem = null;
         for (Entry<T, Long> entry : this.store.entrySet()) {
-            if (max.equals(entry.getValue())) {
-                return entry.getKey();
+            if (entry.getKey() == null) {
+                continue;
+            }
+            if (entry.getValue() > maxKey) {
+                maxKey = entry.getValue();
+                mostItem = entry.getKey();
             }
         }
-        return null;
+        return mostItem;
     }
 }
