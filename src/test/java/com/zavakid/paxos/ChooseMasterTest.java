@@ -16,10 +16,11 @@ package com.zavakid.paxos;
 import static org.junit.Assert.assertEquals;
 
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionService;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -77,17 +78,43 @@ public class ChooseMasterTest {
     }
 
     @Test
-    public void test_concurrent_1Proposer_1Acceptor() throws InterruptedException, ExecutionException {
-        quorum = QuorumFactory.create(1, 1);
+    public void test_concurrent() throws Exception {
+        // 1 acceptor, 1 proposer, 3 client , loop 100 instances
+        testConcurrentWithLoopNum(1, 1, 3, 100);
+
+        // 3 acceptor, 1 proposer, 3 client , loop 100 instances
+        testConcurrentWithLoopNum(3, 1, 3, 100);
+
+        // 3 acceptor, 3 proposer, 3 client , loop 100 instances
+        testConcurrentWithLoopNum(3, 3, 3, 100);
+
+        // 5 acceptor, 5 proposer, 5 client , loop 100 instances
+        testConcurrentWithLoopNum(5, 5, 5, 100);
+    }
+
+    public void testConcurrentWithLoopNum(int acceptorNum, int proposerNum, int clientNum, int loopNum)
+                                                                                                       throws Exception {
+        for (int i = 0; i < loopNum; i++) {
+            testConcurrent(acceptorNum, proposerNum, clientNum);
+        }
+
+    }
+
+    public void testConcurrent(int acceptorNum, int proposerNum, int clientNum) throws Exception {
+        if (quorum != null) {
+            quorum.stop();
+        }
+        quorum = QuorumFactory.create(acceptorNum, proposerNum);
         CompletionService executor = createCompletionService();
 
-        Proposer proposer1 = quorum.getProposers().get(0);
-        executor.submit(new ProposorCall(proposer1, "master", "node_1"));
-        executor.submit(new ProposorCall(proposer1, "master", "node_2"));
-        executor.submit(new ProposorCall(proposer1, "master", "node_3"));
+        Random random = new Random();
+        List<Proposer> proposers = quorum.getProposers();
+        for (int i = 0; i < clientNum; i++) {
+            executor.submit(new ProposorCall(proposers.get(random.nextInt(proposerNum)), "master", "node_" + i));
+        }
 
-        ArrayList<Object> results = new ArrayList<Object>();
-        for (int i = 0; i < 3; i++) {
+        ArrayList<Object> results = new ArrayList<Object>(clientNum);
+        for (int i = 0; i < clientNum; i++) {
             Future<Object> future = executor.take();
             Object result = future.get();
             results.add(result);

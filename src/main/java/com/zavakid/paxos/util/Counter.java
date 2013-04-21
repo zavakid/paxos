@@ -50,7 +50,7 @@ public class Counter<T> {
     }
 
     public T getMostItem() {
-        Collection<Long> values = values();
+
         Long maxKey = -1L;
         T mostItem = null;
         for (Entry<T, Long> entry : this.store.entrySet()) {

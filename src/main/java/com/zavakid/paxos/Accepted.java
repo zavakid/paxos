@@ -29,7 +29,7 @@ public class Accepted implements NAKAble {
     }
 
     public static Accepted create(Long epoch, Object var, Object value, boolean isNAK) {
-        return new Accepted(epoch, var, value, false);
+        return new Accepted(epoch, var, value, isNAK);
     }
 
     public Accepted(Long epoch, Object var, Object value, boolean isNAK){

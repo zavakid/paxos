@@ -49,6 +49,7 @@ public class DefaultProposer implements Proposer {
     private static final Logger LOG         = LoggerFactory.getLogger(DefaultProposer.class);
     private static final String NAME_PREFIX = "proposer_";
     private AtomicLong          EPOCH_SEQ   = new AtomicLong();
+    private AtomicLong          LAST_EPOCH  = new AtomicLong(-1L);
 
     private String              name;
     private Set<Acceptor>       acceptors   = new HashSet<Acceptor>();
@@ -72,13 +73,13 @@ public class DefaultProposer implements Proposer {
     }
 
     public Object propose(final Object var, final Object value) {
-        final Long epoch = generateEpoch(EPOCH_SEQ.getAndIncrement(), var);
+        final Long epoch = generateEpoch(0L, var);
         return proposeWithEpoch(epoch, var, value);
     }
 
     public Object proposeWithEpoch(final Long epoch, final Object var, final Object value) {
         MDC.put(MDCs.MDC_NAME, this.name);
-        LOG.info("start to prepare epoch[{}] for var [{}], value [{}]", epoch, var, value);
+        LOG.info("start to send prepare (epoch[{}], var [{}], value [{}])", epoch, var, value);
         List<Promise> promises = concurrentPrepare(var, epoch);
         // 有可能是网络出现中断引起的
         if (promises.size() < this.majorityAcceptorNum) {
@@ -115,6 +116,15 @@ public class DefaultProposer implements Proposer {
             Asserts.unreachable();
         }
 
+        LOG.info("prepare (epoch [{}], var [{}], value [{}]) status  : nakPromisesNum [{}], maxEpoch [{}], firstPromises [{}], maybeHasValuePromises [{}], this.majorityAcceptorNum [{}]",
+            epoch,
+            var,
+            value,
+            nakPromisesNum,
+            maxEpoch,
+            firstPromises,
+            maybeHasValuePromises,
+            this.majorityAcceptorNum);
         if (nakPromisesNum >= this.majorityAcceptorNum) {
             LOG.info("prepare fail for var [{}], value [{}], nakPromisesNum [{}] is greater then majorityAcceptorNum [{}], the max preEpoch is [{}]",
                 var,
@@ -150,7 +160,7 @@ public class DefaultProposer implements Proposer {
             return tryAccept(epoch, var, newValue);
         }
 
-        return Asserts.unreachable();
+        return nextRound(maxEpoch, var, value);
 
     }
 
@@ -183,15 +193,32 @@ public class DefaultProposer implements Proposer {
             Asserts.unreachable();
         }
 
+        LOG.info("accept (epoch [{}], var [{}], value [{}]) status : nakAcceptedNum [{}], successAcceptedNum [{}], maxEpochWhenAccepted [{}], majorityAcceptorNum [{}]",
+            epoch,
+            var,
+            value,
+            nakAcceptedNum,
+            successAcceptedNum,
+            maxEpochWhenAccepted,
+            this.majorityAcceptorNum);
+
         if (nakAcceptedNum >= this.majorityAcceptorNum) {
+            LOG.info("NAK accept, epoch [{}], var [{}], value[{}], the maxEpochWhenAccepted is [{}]",
+                epoch,
+                var,
+                value,
+                maxEpochWhenAccepted);
             return nextRound(maxEpochWhenAccepted, var, value);
         }
 
         if (successAcceptedNum >= this.majorityAcceptorNum) {
+            LOG.info("ACK accept, epoch [{}], var [{}], value[{}]", epoch, var, value);
             return oldAcceptedValues.getMostItem();
         }
 
-        return Asserts.unreachable();
+        // 跑到这里，有可能是有偶数个 acceptor，并且 nakAcceptedNum == successAcceptedNum
+        // 所以认为没有超过一半 acceptor 同意，因此需要进行下一轮
+        return nextRound(maxEpochWhenAccepted, var, value);
     }
 
     protected List<Promise> concurrentPrepare(final Object var, final Long epoch) {
@@ -260,10 +287,21 @@ public class DefaultProposer implements Proposer {
         e.printStackTrace();
     }
 
-    private Long generateEpoch(Long preEpoch, Object var) {
-        long factor = this.EPOCH_SEQ.getAndIncrement();
-        preEpoch = preEpoch > factor ? preEpoch : factor;
-        return ((preEpoch) / this.proposerNum) * proposerNum + this.proposerId;
+    /**
+     * preEpoch 可能是从 EPOCH_SEQ.getAndIncrement(); 获得<br/>
+     * 也可能是从上次 prepare/acceptor 中获得的最大 epoch <br/>
+     */
+    synchronized protected Long generateEpoch(Long preEpoch, Object var) {
+        long lastEpoch = this.EPOCH_SEQ.get();
+        if (preEpoch > lastEpoch) {
+            long epoch = (preEpoch / this.proposerNum + 1) * this.proposerNum + this.proposerId;
+            this.EPOCH_SEQ.set(epoch);
+            return epoch;
+        } else {
+            long epoch = ((lastEpoch / this.proposerNum + 1) * this.proposerNum) + this.proposerId;
+            this.EPOCH_SEQ.set(epoch);
+            return epoch;
+        }
     }
 
     @Override

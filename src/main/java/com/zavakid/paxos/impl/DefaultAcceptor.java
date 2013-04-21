@@ -65,7 +65,7 @@ public class DefaultAcceptor implements Acceptor {
             return Promise.create(preEpoch, var, oldValue, true);
         }
 
-        LOG.info("ACK prepare for var [{}], epoch [{}], preEpoch [{}]", var, epoch, preEpoch);
+        LOG.info("ACK accept for var [{}], epoch [{}], preEpoch [{}]", var, epoch, preEpoch);
         lastestEpoches.put(var, epoch);
         return Promise.create(preEpoch, var, oldValue);
     }
