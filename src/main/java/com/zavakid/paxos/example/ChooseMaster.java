@@ -30,18 +30,15 @@ public class ChooseMaster {
     public static void main(String[] args) {
         Set<Acceptor> acceptors = new HashSet<Acceptor>();
         acceptors.add(new DefaultAcceptor());
-        acceptors.add(new DefaultAcceptor());
-        acceptors.add(new DefaultAcceptor());
 
-        Proposer proposer1 = new DefaultProposer(acceptors, 1, acceptors.size(), 5);
-        Proposer proposer2 = new DefaultProposer(acceptors, 2, acceptors.size(), 5);
-        Proposer proposer3 = new DefaultProposer(acceptors, 3, acceptors.size(), 5);
+        Proposer proposer1 = new DefaultProposer(acceptors, 0, acceptors.size(), 5);
+        Proposer proposer2 = new DefaultProposer(acceptors, 1, acceptors.size(), 5);
+        Proposer proposer3 = new DefaultProposer(acceptors, 2, acceptors.size(), 5);
+        Object value2 = proposer2.propose("master", "node_2");
+        System.out.println(value2);
 
         Object value = proposer1.propose("master", "node_1");
         System.out.println(value);
-
-        Object value2 = proposer2.propose("master", "node_2");
-        System.out.println(value2);
 
         Object value3 = proposer3.propose("master", "node_3");
         System.out.println(value3);

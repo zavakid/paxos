@@ -29,7 +29,7 @@ public class Promise implements NAKAble {
     }
 
     public static Promise create(Long preEpoch, Object var, Object value, boolean isNAK) {
-        return new Promise(preEpoch, var, value, false);
+        return new Promise(preEpoch, var, value, isNAK);
     }
 
     public Promise(Long preEpoch, Object var, Object value, boolean isNAK){
