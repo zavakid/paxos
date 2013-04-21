@@ -79,17 +79,14 @@ public class ChooseMasterTest {
 
     @Test
     public void test_concurrent() throws Exception {
-        // 1 acceptor, 1 proposer, 3 client , loop 100 instances
-        testConcurrentWithLoopNum(1, 1, 3, 100);
+        // 1 acceptor, 1 proposer, 3 client , loop 50 instances
+        testConcurrentWithLoopNum(1, 1, 3, 50);
 
-        // 3 acceptor, 1 proposer, 3 client , loop 100 instances
-        testConcurrentWithLoopNum(3, 1, 3, 100);
+        testConcurrentWithLoopNum(3, 1, 3, 50);
 
-        // 3 acceptor, 3 proposer, 3 client , loop 100 instances
-        testConcurrentWithLoopNum(3, 3, 3, 100);
+        testConcurrentWithLoopNum(3, 3, 3, 50);
 
-        // 5 acceptor, 5 proposer, 5 client , loop 100 instances
-        testConcurrentWithLoopNum(5, 5, 5, 100);
+        testConcurrentWithLoopNum(5, 5, 5, 50);
     }
 
     public void testConcurrentWithLoopNum(int acceptorNum, int proposerNum, int clientNum, int loopNum)
